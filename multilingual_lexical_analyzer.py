@@ -1,60 +1,61 @@
 from tabulate import tabulate
 
 class Token:
-    def _init_(self, token_type, value):
+    def __init__(self, token_type, value):
         self.token_type = token_type
         self.value = value
 
 class Lexer:
-    def _init_(self, code, language):
+    def __init__(self, code, language):
         self.code = code
         self.tokens = []
-        self.errors = []  # List to store error messages
+        self.errors = []
         self.language = language
         self.keywords = self.get_keywords(language)
         self.operators = self.get_operators(language)
+        self.system_io_functions = self.get_system_io_functions()  # Functions that can follow `System.out`
+        self.standard_classes = self.get_standard_classes()  # To recognize Java standard classes like StringBuilder
         self.current_state = 'start'
         self.current_token = ''
-        self.string_open_char = None  # Track opening char for strings
-        self.line_number = 1  # Track line number for error reporting
-        self.position = 0  # Track character position for error reporting
+        self.previous_token = ''  # To track previous token for `System.out`
+        self.string_open_char = None
+        self.line_number = 1
+        self.position = 0
+        self.is_package_import = False  # To track if we are in a package import sequence
 
     def get_keywords(self, language):
         if language == "java":
             return set(['abstract', 'assert', 'boolean', 'break', 'byte', 'case', 'catch', 'char', 'class', 'const', 'continue', 'default', 'do', 'double', 'else', 'enum', 'extends', 'final', 'finally', 'float', 'for', 'if', 'implements', 'import', 'instanceof', 'int', 'interface', 'long', 'native', 'new', 'package', 'private', 'protected', 'public', 'return', 'short', 'static', 'strictfp', 'super', 'switch', 'synchronized', 'this', 'throw', 'throws', 'transient', 'try', 'void', 'volatile', 'while'])
-        elif language == "c":
-            return set(['auto', 'break', 'case', 'char', 'const', 'continue', 'default', 'do', 'double', 'else', 'enum', 'extern', 'float', 'for', 'goto', 'if', 'inline', 'int', 'long', 'register', 'restrict', 'return', 'short', 'signed', 'sizeof', 'static', 'struct', 'switch', 'typedef', 'union', 'unsigned', 'void', 'volatile', 'while'])
-        elif language == "cpp":
-            return set(['alignas', 'alignof', 'and', 'and_eq', 'asm', 'auto', 'bitand', 'bitor', 'bool', 'break', 'case', 'catch', 'char', 'char8_t', 'char16_t', 'char32_t', 'class', 'compl', 'concept', 'const', 'constexpr', 'const_cast', 'continue', 'co_await', 'co_return', 'co_yield', 'decltype', 'default', 'delete', 'do', 'double', 'dynamic_cast', 'else', 'enum', 'explicit', 'export', 'extern', 'false', 'float', 'for', 'friend', 'goto', 'if', 'inline', 'int', 'long', 'mutable', 'namespace', 'new', 'noexcept', 'not', 'not_eq', 'nullptr', 'operator', 'or', 'or_eq', 'private', 'protected', 'public', 'reflexpr', 'register', 'reinterpret_cast', 'requires', 'return', 'short', 'signed', 'sizeof', 'static', 'static_assert', 'static_cast', 'struct', 'switch', 'synchronized', 'template', 'this', 'thread_local', 'throw', 'true', 'try', 'typedef', 'typeid', 'typename', 'union', 'unsigned', 'using', 'virtual', 'void', 'volatile', 'wchar_t', 'while', 'xor', 'xor_eq'])
         else:
             raise ValueError("Unsupported language")
 
     def get_operators(self, language):
         if language == "java":
-            return set(['+', '-', '', '/', '%', '++', '--', '=', '+=', '-=', '=', '/=', '%=', '==', '!=', '>', '<', '>=', '<=', '&&', '||', '!', '&', '|', '^', '<<', '>>', '~', '>>>'])
-        elif language == "c":
-            return set(['+', '-', '', '/', '%', '++', '--', '=', '+=', '-=', '=', '/=', '%=', '==', '!=', '>', '<', '>=', '<=', '&&', '||', '!', '&', '|', '^', '<<', '>>', '~'])
-        elif language == "cpp":
-            return set(['+', '-', '', '/', '%', '++', '--', '=', '+=', '-=', '=', '/=', '%=', '==', '!=', '>', '<', '>=', '<=', '&&', '||', '!', '&', '|', '^', '<<', '>>', '~', '>>=', '<<=', '->', '->', '::', '.'])
+            return set(['+', '-', '*', '/', '%', '++', '--', '=', '+=', '-=', '*=', '/=', '%=', '==', '!=', '>', '<', '>=', '<=', '&&', '||', '!', '&', '|', '^', '<<', '>>', '~', '>>>'])
         else:
             raise ValueError("Unsupported language")
 
+    def get_system_io_functions(self):
+        # Functions that can follow `System.out`
+        return {'println', 'print', 'flush'}
+
+    def get_standard_classes(self):
+        # Recognize common Java standard classes like String, StringBuilder, Scanner, etc.
+        return {'StringBuilder', 'String', 'Scanner', 'System'}
+
     def add_token(self, token_type):
         if self.current_token:
-            if token_type == 'Identifier' and self.current_token in self.get_standard_functions():
-                self.tokens.append(Token('Standard Function', self.current_token))
-            else:
-                self.tokens.append(Token(token_type, self.current_token))
+            self.tokens.append(Token(token_type, self.current_token))
         self.current_token = ''
 
     def report_error(self, message):
         self.errors.append(f"Error at line {self.line_number}, position {self.position}: {message}")
 
     def transition(self, char):
-        self.position += 1  # Increment position for each character
+        self.position += 1
         if char == '\n':
             self.line_number += 1
-            self.position = 0  # Reset position for new line
+            self.position = 0
 
         state_actions = {
             'start': self.handle_start,
@@ -67,7 +68,6 @@ class Lexer:
             'comment': self.handle_comment,
         }
 
-        # Call the appropriate handling method based on current state
         if self.current_state in state_actions:
             state_actions[self.current_state](char)
         else:
@@ -90,22 +90,22 @@ class Lexer:
         elif char in self.operators:
             self.current_state = 'operator'
             self.current_token += char
-        elif char in '(){};,.':
+        elif char in '(){};,:[]':  # Updated to recognize valid symbols
             self.add_token('Symbol')
             self.tokens.append(Token('Symbol', char))
         elif char.isspace():
-            pass  # Ignore whitespace in start state
+            pass  # Ignore whitespace
         elif char == '/':
-            self.current_state = 'comment'  # Start of comment
+            self.current_state = 'comment'
             self.current_token += char
         else:
             self.report_error(f"Invalid character '{char}'")
 
     def handle_comment(self, char):
         if char == '\n':
-            self.current_state = 'start'  # End of comment
+            self.current_state = 'start'
         else:
-            self.current_token += char  # Collect comment content
+            self.current_token += char
 
     def handle_preprocessor(self, char):
         if self.current_token == '#include':
@@ -117,31 +117,46 @@ class Lexer:
         elif char.isalnum() or char == '_':
             self.current_token += char
         elif char.isspace():
-            self.add_token('Preprocessor')  # Add the directive
-            self.current_state = 'start'  # Reset state to start
+            self.add_token('Preprocessor')
+            self.current_state = 'start'
         else:
-            self.current_token += char  # Handle symbols in preprocessing
+            self.current_token += char
 
     def handle_header_file(self, char):
         if char.isalnum() or char in ('_', '.', '/', '\\'):
             self.current_token += char
         elif char == '"':
-            self.add_token('Header')  # User-defined header
+            self.add_token('Header')
             self.current_state = 'start'
         elif char == '>':
-            self.add_token('Header')  # System header
+            self.add_token('Header')
             self.current_state = 'start'
         else:
-            self.current_token += char  # Handle unexpected characters
+            self.current_token += char
 
     def handle_identifier(self, char):
-        if char.isalnum() or char == '_':
+        if char == '.':
+            if self.current_token:
+                self.current_token += char  # Combine identifiers like java.util.Scanner or System.out
+        elif self.previous_token == 'System.out' and self.current_token in self.system_io_functions:
+            # Combine System.out.println or similar
+            combined_token = f"System.out.{self.current_token}"
+            self.tokens.pop()  # Remove the System.out token from tokens
+            self.tokens.append(Token('System Input/Output', combined_token))  # Add combined token
+            self.previous_token = ''
+            self.current_token = ''
+        elif char.isalnum() or char == '_':
             self.current_token += char
         else:
-            if self.current_token in self.keywords:
+            # Check if it's a class name, method name, or standard class
+            if self.current_token in self.standard_classes:
+                self.add_token('Class Name')
+            elif self.current_token[0].isupper():
+                self.add_token('Class Name')  # Assuming identifiers starting with uppercase are classes
+            elif self.current_token in self.keywords:
                 self.add_token('Keyword')
-            elif self.current_token[0].isdigit():  # Invalid identifier
-                self.report_error(f"Invalid identifier '{self.current_token}'")
+            elif self.current_token[0].islower() and char == '(':
+                self.add_token('Method Name')  # Methods usually start with lowercase
             else:
                 self.add_token('Identifier')
             self.current_state = 'start'
@@ -160,8 +175,8 @@ class Lexer:
         if char == self.string_open_char:
             self.add_token('String')
             self.current_state = 'start'
-            self.string_open_char = None  # Reset the string tracker
-        elif self.position == len(self.code):  # End of code without closing quote
+            self.string_open_char = None
+        elif self.position == len(self.code):
             self.report_error("Unterminated string literal")
 
     def handle_operator(self, char):
@@ -175,28 +190,30 @@ class Lexer:
     def tokenize(self):
         for char in self.code:
             self.transition(char)
-        # Add any remaining token after the loop
         if self.current_token:
-            if self.current_state == 'identifier':
-                if self.current_token in self.keywords:
-                    self.add_token('Keyword')
-                elif self.current_token[0].isdigit():  # Invalid identifier
-                    self.report_error(f"Invalid identifier '{self.current_token}'")
-                else:
-                    self.add_token('Identifier')
-            elif self.current_state == 'number':
-                self.add_token('Number')
-            elif self.current_state == 'string':
-                self.add_token('String')
-            elif self.current_state == 'operator':
-                self.add_token('Operator')
+            if self.previous_token == 'System.out' and self.current_token in self.system_io_functions:
+                combined_token = f"System.out.{self.current_token}"
+                self.tokens.pop()  # Remove the `System.out` token
+                self.tokens.append(Token('System Input/Output', combined_token))  # Add combined token
+            elif self.current_token in self.standard_classes:
+                self.add_token('Class Name')
+            elif self.current_token in self.keywords:
+                self.add_token('Keyword')
+            elif self.current_token[0].isdigit():
+                self.report_error(f"Invalid identifier '{self.current_token}'")
             else:
-                self.add_token('Symbol')
+                self.add_token('Identifier')
+        elif self.current_state == 'number':
+            self.add_token('Number')
+        elif self.current_state == 'string':
+            self.add_token('String')
+        elif self.current_state == 'operator':
+            self.add_token('Operator')
 
         return self.tokens
 
     def get_standard_functions(self):
-        return set(['printf', 'scanf', 'malloc', 'free', 'return', 'exit'])  # Add more as needed
+        return set(['System.out.println', 'printf', 'scanf', 'malloc', 'free', 'return', 'exit'])
 
 def generate_token_table(tokens):
     table = []
